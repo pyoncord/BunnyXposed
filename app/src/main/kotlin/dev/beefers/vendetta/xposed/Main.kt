@@ -1,4 +1,4 @@
-package dev.beefers.vendetta.xposed
+package com.pyoncord.xposed
 
 import java.io.File
 import java.lang.Exception
@@ -28,23 +28,26 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
     }
 
     // Hook function responsible for loading Discord's package
-    // Also, Kotlin has `with`? How does this language have literally everything?!
     override fun handleLoadPackage(param: XC_LoadPackage.LoadPackageParam) = with(param) {
-        // Stop executing when we aren't in Discord's React Native context
-        val catalystInstance = try { classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl") } catch(e: ClassNotFoundException) { return }
+        val catalystInstance = try { 
+            classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl") 
+        } catch (e: ClassNotFoundException) { 
+            // Package is not the target app, return
+            return@with
+        }
 
         val cache = File(appInfo.dataDir, "cache").also { it.mkdirs() }
-        val bundle = File(cache, "vendetta.js")
-        val etag = File(cache, "vendetta_etag.txt")
+        val bundle = File(cache, "pyoncord.js")
+        val etag = File(cache, "pyoncord_etag.txt")
 
         val scope = MainScope()
         val httpJob = scope.async(Dispatchers.IO) {
             try {
                 val client = HttpClient(CIO) {
                     install(HttpTimeout) { requestTimeoutMillis = 1000 }
-                    install(UserAgent) { agent = "VendettaXposed" }
+                    install(UserAgent) { agent = "PyoncordXposed" }
                 }
-                val response: HttpResponse = client.get("https://raw.githubusercontent.com/vendetta-mod/builds/master/vendetta.js") {
+                val response: HttpResponse = client.get("https://raw.githubusercontent.com/pyoncord/pyoncord/builds/pyoncord.js") {
                     headers { if (etag.exists() && bundle.exists()) append(HttpHeaders.IfNoneMatch, etag.readText()) }
                 }
 
@@ -55,7 +58,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
 
                 return@async
             } catch (e: Exception) {
-                Log.e("Vendetta", "Failed to download Vendetta")
+                Log.e("Pyoncord", "Failed to download pyoncord.js bundle")
             }
         }
 
@@ -66,9 +69,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
 
         val hook = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                Log.d("Vendetta", "Exfiltrating Metro modules")
                 XposedBridge.invokeOriginalMethod(loadScriptFromAssets,param.thisObject, arrayOf(resources.assets, "assets://js/modules.js", true))
-                Log.d("Vendetta", "Executing identity snippet")
                 XposedBridge.invokeOriginalMethod(loadScriptFromAssets, param.thisObject, arrayOf(resources.assets, "assets://js/identity.js", true))
             }
 
@@ -76,7 +77,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                 scope.launch(scope.coroutineContext) {
                     try {
                         httpJob.await()
-                        Log.d("Vendetta", "Executing Vendetta")
+                        Log.d("Pyoncord", "Executing Pyoncord")
                         XposedBridge.invokeOriginalMethod(loadScriptFromFile, param.thisObject, arrayOf(bundle.absolutePath, bundle.absolutePath, param.args[2]))
                     } catch (_: Exception) {}
                 }

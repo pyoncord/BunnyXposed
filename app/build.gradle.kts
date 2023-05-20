@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.beefers.vendetta.xposed"
+    namespace = "com.pyoncord.xposed"
     compileSdk = 33
 
     defaultConfig {
-        applicationId = "dev.beefers.vendetta.xposed"
+        applicationId = "com.pyoncord.xposed"
         minSdk = 24
         targetSdk = 33
         versionCode = 1

@@ -1,4 +1,3 @@
-globalThis.__vendetta_loader = {
-    name: "VendettaXposed",
-    features: {},
+globalThis.__pyoncord_loader_payload = {
+    name: "PyoncordXposed",
 }
