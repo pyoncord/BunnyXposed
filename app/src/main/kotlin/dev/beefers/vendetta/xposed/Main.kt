@@ -5,6 +5,7 @@ import java.lang.Exception
 import kotlinx.coroutines.*
 import android.content.res.AssetManager
 import android.content.res.XModuleResources
+import android.content.res.Resources
 import android.util.Log
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
@@ -75,10 +76,22 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         val loadScriptFromAssets = catalystInstance.getDeclaredMethod("jniLoadScriptFromAssets", AssetManager::class.java, String::class.java, Boolean::class.javaPrimitiveType)
         val loadScriptFromFile = catalystInstance.getDeclaredMethod("jniLoadScriptFromFile", String::class.java, String::class.java, Boolean::class.javaPrimitiveType)
 
+        // Mirror resource resolver to "com.discord" if the package name is renamed
+        // I don't know if there's any side effect with this - amsyar@pylix 
+        if (packageName != "com.discord") {
+            val getIdentifier = Resources::class.java.getDeclaredMethod("getIdentifier", String::class.java, String::class.java, String::class.java);
+            
+            XposedBridge.hookMethod(getIdentifier, object: XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (param.args[2] == packageName) param.args[2] = "com.discord"
+                }
+            })
+        }
+
         // TODO: Loader config
         val hook = object: XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) = with(param) {
-                Log.i(LOG_TAG, "Hooking ${method.name} to load Pyoncord")
+                Log.d(LOG_TAG, "Hooking ${method.name} to load Pyoncord")
 
                 // Load pre-patches and identity
                 XposedBridge.invokeOriginalMethod(loadScriptFromAssets, thisObject, arrayOf(resources.assets, "assets://js/modules.js", true))
