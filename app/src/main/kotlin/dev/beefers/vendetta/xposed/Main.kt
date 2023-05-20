@@ -18,8 +18,17 @@ import io.ktor.client.engine.cio.*
 import io.ktor.client.statement.*
 import io.ktor.client.plugins.*
 import io.ktor.http.*
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
+    companion object {
+        const val LOG_TAG = "Pyoncord"
+        const val DEFAULT_ENDPOINT = "https://raw.githubusercontent.com/pyoncord/pyoncord/builds/pyoncord.js"
+    }
+
     private lateinit var resources: XModuleResources
 
     // Assign module resources in process zygote
@@ -31,23 +40,24 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
     override fun handleLoadPackage(param: XC_LoadPackage.LoadPackageParam) = with(param) {
         val catalystInstance = try { 
             classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl") 
-        } catch (e: ClassNotFoundException) { 
+        } catch (e: ClassNotFoundException) {
             // Package is not the target app, return
             return@with
         }
 
-        val cache = File(appInfo.dataDir, "cache").also { it.mkdirs() }
-        val bundle = File(cache, "pyoncord.js")
-        val etag = File(cache, "pyoncord_etag.txt")
+        val files = File(appInfo.dataDir, "files").also { it.mkdirs() }
+        val pyoncordFd = File(files, "pyoncord").also { it.mkdirs() }
 
-        val scope = MainScope()
-        val httpJob = scope.async(Dispatchers.IO) {
+        val bundle = File(pyoncordFd, "pyoncord.js")
+        val etag = File(pyoncordFd, "~$.etag")
+
+        val httpJob = GlobalScope.launch(Dispatchers.IO) {
             try {
                 val client = HttpClient(CIO) {
                     install(HttpTimeout) { requestTimeoutMillis = 1000 }
                     install(UserAgent) { agent = "PyoncordXposed" }
                 }
-                val response: HttpResponse = client.get("https://raw.githubusercontent.com/pyoncord/pyoncord/builds/pyoncord.js") {
+                val response: HttpResponse = client.get(DEFAULT_ENDPOINT) {
                     headers { if (etag.exists() && bundle.exists()) append(HttpHeaders.IfNoneMatch, etag.readText()) }
                 }
 
@@ -56,9 +66,9 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                     if (response.headers.contains("Etag")) etag.writeText(response.headers["Etag"] as String)
                 }
 
-                return@async
+                return@launch
             } catch (e: Exception) {
-                Log.e("Pyoncord", "Failed to download pyoncord.js bundle")
+                Log.e(LOG_TAG, "Failed to download pyoncord.js bundle")
             }
         }
 
@@ -66,21 +76,23 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         val loadScriptFromFile = catalystInstance.getDeclaredMethod("jniLoadScriptFromFile", String::class.java, String::class.java, Boolean::class.javaPrimitiveType)
 
         // TODO: Loader config
+        val hook = object: XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) = with(param) {
+                Log.i(LOG_TAG, "Hooking ${method.name} to load Pyoncord")
 
-        val hook = object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                XposedBridge.invokeOriginalMethod(loadScriptFromAssets,param.thisObject, arrayOf(resources.assets, "assets://js/modules.js", true))
-                XposedBridge.invokeOriginalMethod(loadScriptFromAssets, param.thisObject, arrayOf(resources.assets, "assets://js/identity.js", true))
-            }
+                // Load pre-patches and identity
+                XposedBridge.invokeOriginalMethod(loadScriptFromAssets, thisObject, arrayOf(resources.assets, "assets://js/modules.js", true))
+                XposedBridge.invokeOriginalMethod(loadScriptFromAssets, thisObject, arrayOf(resources.assets, "assets://js/identity.js", true))
+                
+                // Invoke the original method
+                XposedBridge.invokeOriginalMethod(method, thisObject, args)
 
-            override fun afterHookedMethod(param: MethodHookParam) {
-                scope.launch(scope.coroutineContext) {
-                    try {
-                        httpJob.await()
-                        Log.d("Pyoncord", "Executing Pyoncord")
-                        XposedBridge.invokeOriginalMethod(loadScriptFromFile, param.thisObject, arrayOf(bundle.absolutePath, bundle.absolutePath, param.args[2]))
-                    } catch (_: Exception) {}
-                }
+                // Wait for bundle to download. Then, execute our bundle
+                runBlocking { httpJob.join() }
+                XposedBridge.invokeOriginalMethod(loadScriptFromFile, thisObject, arrayOf(bundle.absolutePath, bundle.absolutePath, args[2]))
+
+                // Prevent from invoking the original method
+                setResult(null)
             }
         }
 
