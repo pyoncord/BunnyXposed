@@ -1,17 +1,17 @@
 package com.pyoncord.xposed
 
-import java.io.File
-import java.lang.Exception
-import java.lang.System
-import kotlinx.coroutines.*
 import android.app.Activity
 import android.content.Intent
 import android.content.res.AssetManager
-import android.content.res.XModuleResources
 import android.content.res.Resources
-import android.util.Log
+import android.content.res.XModuleResources
+import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.util.Log
+import android.annotation.SuppressLint
+import android.graphics.fonts.Font
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.XC_MethodHook
@@ -19,18 +19,18 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import io.ktor.client.*
 import io.ktor.client.call.*
-import io.ktor.client.request.*
 import io.ktor.client.engine.cio.*
-import io.ktor.client.statement.*
 import io.ktor.client.plugins.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.coroutines.*
 import kotlinx.serialization.*
 import kotlinx.serialization.json.*
-
-import android.net.Uri
-import android.provider.Settings
-
-import java.util.HashMap;
+import java.io.File
+import java.lang.Exception
+import java.lang.System
+import java.util.HashMap
 
 class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
     companion object {
@@ -69,7 +69,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
     fun restartApp() = with(appActivity.applicationContext) {
         val intent = packageManager.getLaunchIntentForPackage(packageName)!!
 
-        appActivity.startActivity(Intent.makeRestartActivityTask(intent.getComponent()))
+        appActivity.startActivity(Intent.makeRestartActivityTask(intent.component))
         System.exit(0)
     }
 
@@ -102,6 +102,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         }
     }
 
+    @SuppressLint("NewApi")
     fun init(param: XC_LoadPackage.LoadPackageParam) = with(param) {
         val catalystInstance = classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl")
 
@@ -109,17 +110,39 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
             checkForUpdate() 
         }
 
-        // TODO: How bad is this? Discord seem to not even use it from JS, but maybe I'll add some check soon anyway (hopefully :P)
         runCatching {
+            // TODO: How bad is this? Discord seem to not even use it from JS, but maybe I'll add some check soon anyway (hopefully :P)
             val fileManagerModule = classLoader.loadClass("com.discord.file_manager.FileManagerModule")
 
             XposedBridge.hookMethod(fileManagerModule.constructors.first(), object: XC_MethodHook() {
+                @Suppress("UNCHECKED_CAST")
                 override fun afterHookedMethod(param: MethodHookParam): Unit = with(param) {
-                    val storageDirs = (thisObject as Object).getClass().getDeclaredField("storageDirs").apply { isAccessible = true }.get(thisObject) as (HashMap<String, String>)
+                    val storageDirsField = (param.thisObject as Any).javaClass.getDeclaredField("storageDirs").apply { isAccessible = true }
+                    val storageDirs = storageDirsField.get(param.thisObject) as HashMap<String, String>
+
                     // Redirect 'documents' to our 'pyoncord' folder
-                    storageDirs.put("documents", filesDir.absolutePath)
+                    storageDirs["documents"] = filesDir.absolutePath
                 }
             })
+
+            val fontHook = object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
+                    File(pyoncord, args[1] as String).takeIf { it.exists() }?.let {
+                        Log.d(LOG_TAG, "Overriding font from ${args[1]} to $it")
+                        result = if (method.name == "createFromAsset") Typeface.createFromFile(it.absolutePath) else Font.Builder(it)
+                    }
+                }
+            }
+
+            XposedBridge.hookMethod(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Font.Builder::class.java.getDeclaredConstructor(AssetManager::class.java, String::class.java)
+                } else {
+                    // I don't have any older device to test, so let's just wish this works and doesn't break anything :P
+                    Typeface::class.java.getDeclaredMethod("createFromAsset", AssetManager::class.java, String::class.java)
+                },
+                fontHook
+            )
         }
 
         val loadScriptFromAssets = catalystInstance.getDeclaredMethod("jniLoadScriptFromAssets", AssetManager::class.java, String::class.java, Boolean::class.javaPrimitiveType)
