@@ -2,10 +2,13 @@ package com.pyoncord.xposed
 
 import android.app.Activity
 import android.content.Intent
+import android.content.Context
 import android.content.res.AssetManager
 import android.content.res.Resources
 import android.content.res.XModuleResources
+import android.graphics.drawable.Drawable
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -42,6 +45,8 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
 
         val bundle = File(pyoncord, "pyoncord.js")
         val etag = File(pyoncord, "etag")
+
+        val drawablesDir = File(pyoncord, "drawables")
     }
 
     private lateinit var resources: XModuleResources
@@ -134,6 +139,18 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                 }
             }
 
+            // Fight package renaming side effects
+            if (packageName != "com.discord") {
+                val getIdentifier = Resources::class.java.getDeclaredMethod("getIdentifier", String::class.java, String::class.java, String::class.java)
+                
+                XposedBridge.hookMethod(getIdentifier, object: XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (param.args[2] == packageName) param.args[2] = "com.discord"
+                    }
+                })
+            }
+
+            // Custom fonts
             XposedBridge.hookMethod(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     Font.Builder::class.java.getDeclaredConstructor(AssetManager::class.java, String::class.java)
@@ -143,21 +160,28 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                 },
                 fontHook
             )
+
+            // Custom drawables
+            val uriCache = mutableMapOf<String, Uri?>()
+            val resourceDrawableIdHelper = classLoader.loadClass("com.facebook.react.views.imagehelper.ResourceDrawableIdHelper")
+            
+            XposedBridge.hookMethod(resourceDrawableIdHelper.getDeclaredMethod("getResourceDrawableUri", Context::class.java, String::class.java), object: XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val name = param.args[1] as? String ?: return
+
+                    val uri = uriCache.getOrPut(name) {
+                        File(drawablesDir, "$name.png").takeIf { it.exists() }?.let { 
+                            Uri.fromFile(it) 
+                        } ?: null
+                    }
+
+                    if (uri != null) param.result = uri
+                }
+            })
         }
 
         val loadScriptFromAssets = catalystInstance.getDeclaredMethod("jniLoadScriptFromAssets", AssetManager::class.java, String::class.java, Boolean::class.javaPrimitiveType)
         val loadScriptFromFile = catalystInstance.getDeclaredMethod("jniLoadScriptFromFile", String::class.java, String::class.java, Boolean::class.javaPrimitiveType)
-
-        // Mirror resource resolver to "com.discord" if the package name is renamed
-        if (packageName != "com.discord") {
-            val getIdentifier = Resources::class.java.getDeclaredMethod("getIdentifier", String::class.java, String::class.java, String::class.java)
-            
-            XposedBridge.hookMethod(getIdentifier, object: XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (param.args[2] == packageName) param.args[2] = "com.discord"
-                }
-            })
-        }
 
         // TODO: Loader config
         val hook = object: XC_MethodHook() {
