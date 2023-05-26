@@ -11,6 +11,7 @@ import android.content.res.XModuleResources
 import android.content.res.Resources
 import android.util.Log
 import android.os.Bundle
+import android.os.Environment
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.XC_MethodHook
@@ -26,10 +27,21 @@ import io.ktor.http.*
 import kotlinx.serialization.*
 import kotlinx.serialization.json.*
 
+import android.net.Uri
+import android.provider.Settings
+
+import java.util.HashMap;
+
 class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
     companion object {
         const val LOG_TAG = "Pyoncord"
         const val DEFAULT_BUNDLE_ENDPOINT = "https://raw.githubusercontent.com/pyoncord/pyoncord/builds/pyoncord.js"
+
+        val filesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "pyoncord")
+        val pyoncord = File(filesDir, "pyoncord").apply { mkdirs() }
+
+        val bundle = File(pyoncord, "pyoncord.js")
+        val etag = File(pyoncord, "etag")
     }
 
     private lateinit var resources: XModuleResources
@@ -61,7 +73,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         System.exit(0)
     }
 
-    suspend fun checkForUpdate(bundle: File, etag: File): Unit = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(): Unit = withContext(Dispatchers.IO) {
         val client = HttpClient(CIO) {
             install(HttpTimeout) { requestTimeoutMillis = 1000 }
             install(UserAgent) { agent = "PyoncordXposed" }
@@ -91,16 +103,23 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
     }
 
     fun init(param: XC_LoadPackage.LoadPackageParam) = with(param) {
-        val catalystInstance = classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl") 
-
-        val files = File(appInfo.dataDir, "files").also { it.mkdirs() }
-        val pyoncordFd = File(files, "pyoncord").also { it.mkdirs() }
-
-        val bundle = File(pyoncordFd, "pyoncord.js")
-        val etag = File(pyoncordFd, "etag")
+        val catalystInstance = classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl")
 
         MainScope().launch() { 
-            checkForUpdate(bundle, etag) 
+            checkForUpdate() 
+        }
+
+        // TODO: How bad is this? Discord seem to not even use it from JS, but maybe I'll add some check soon anyway (hopefully :P)
+        runCatching {
+            val fileManagerModule = classLoader.loadClass("com.discord.file_manager.FileManagerModule")
+
+            XposedBridge.hookMethod(fileManagerModule.constructors.first(), object: XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam): Unit = with(param) {
+                    val storageDirs = (thisObject as Object).getClass().getDeclaredField("storageDirs").apply { isAccessible = true }.get(thisObject) as (HashMap<String, String>)
+                    // Redirect 'documents' to our 'pyoncord' folder
+                    storageDirs.put("documents", filesDir.absolutePath)
+                }
+            })
         }
 
         val loadScriptFromAssets = catalystInstance.getDeclaredMethod("jniLoadScriptFromAssets", AssetManager::class.java, String::class.java, Boolean::class.javaPrimitiveType)
