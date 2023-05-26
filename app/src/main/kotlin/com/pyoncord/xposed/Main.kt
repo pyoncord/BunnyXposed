@@ -43,9 +43,12 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         val filesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "pyoncord")
         val pyoncord = File(filesDir, "pyoncord").apply { mkdirs() }
 
-        val bundle = File(pyoncord, "pyoncord.js")
-        val etag = File(pyoncord, "etag")
+        val cache = File(pyoncord, "cache").apply { mkdirs() }
 
+        val bundle = File(cache, "pyoncord.js")
+        val etag = File(cache, "etag")
+
+        // val fontsDir = File(pyoncord, "fonts")
         val drawablesDir = File(pyoncord, "drawables")
     }
 
