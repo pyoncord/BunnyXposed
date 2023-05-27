@@ -139,12 +139,13 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
             XposedBridge.hookMethod(
                 fileManagerModule.declaredMethods.find { it.name == "writeFile" },
                 object: XC_MethodHook() {
+                    @Suppress("UNCHECKED_CAST")
                     override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
                         val dir = args[0] as? String ?: return
                         val path = args[1] as? String ?: return
                         
                         val storageDirs = storageDirsField.get(thisObject) as HashMap<String, String>
-                        if (dir == "documents" && path.contains("pyoncord/")) {
+                        if (dir == "documents" && path.startsWith("pyoncord/")) {
                             val docsDir = File(storageDirs["documents"] as String).toPath()
                             args[1] = docsDir.relativize(File(pyoncord.parentFile, path).toPath()).toString()
                         }
@@ -184,7 +185,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
             )
 
             // Custom drawables
-            val uriCache = mutableMapOf<String, Uri?>()
+            val uriCache = mutableMapOf<String, Uri>()
             val resourceDrawableIdHelper = classLoader.loadClass("com.facebook.react.views.imagehelper.ResourceDrawableIdHelper")
             
             XposedBridge.hookMethod(resourceDrawableIdHelper.getDeclaredMethod("getResourceDrawableUri", Context::class.java, String::class.java), object: XC_MethodHook() {
@@ -194,10 +195,10 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                     val uri = uriCache.getOrPut(name) {
                         File(drawablesDir, "$name.png").takeIf { it.exists() }?.let { 
                             Uri.fromFile(it) 
-                        } ?: null
+                        } ?: Uri.EMPTY
                     }
 
-                    if (uri != null) param.result = uri
+                    if (uri != Uri.EMPTY) param.result = uri
                 }
             })
         }
