@@ -40,8 +40,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         const val LOG_TAG = "Pyoncord"
         const val DEFAULT_BUNDLE_ENDPOINT = "https://raw.githubusercontent.com/pyoncord/pyoncord/builds/pyoncord.js"
 
-        val filesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "pyoncord")
-        val pyoncord = File(filesDir, "pyoncord").apply { mkdirs() }
+        val pyoncord = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "pyoncord").apply { mkdirs() }
 
         val cache = File(pyoncord, "cache").apply { mkdirs() }
 
@@ -119,28 +118,39 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         }
 
         runCatching {
-            // TODO: How bad is this? Discord seem to not even use it from JS, but maybe I'll add some check soon anyway (hopefully :P)
             val fileManagerModule = classLoader.loadClass("com.discord.file_manager.FileManagerModule")
+            val storageDirsField = fileManagerModule.getDeclaredField("storageDirs").apply { isAccessible = true }
 
-            XposedBridge.hookMethod(fileManagerModule.constructors.first(), object: XC_MethodHook() {
-                @Suppress("UNCHECKED_CAST")
-                override fun afterHookedMethod(param: MethodHookParam): Unit = with(param) {
-                    val storageDirsField = (param.thisObject as Any).javaClass.getDeclaredField("storageDirs").apply { isAccessible = true }
-                    val storageDirs = storageDirsField.get(param.thisObject) as HashMap<String, String>
+            XposedBridge.hookMethod(
+                fileManagerModule.declaredMethods.find { it.name == "readFile" },
+                object: XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
+                        val path = args[0] as? String ?: return
 
-                    // Redirect 'documents' to our 'pyoncord' folder
-                    storageDirs["documents"] = filesDir.absolutePath
-                }
-            })
-
-            val fontHook = object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
-                    File(pyoncord, args[1] as String).takeIf { it.exists() }?.let {
-                        Log.d(LOG_TAG, "Overriding font from ${args[1]} to $it")
-                        result = if (method.name == "createFromAsset") Typeface.createFromFile(it.absolutePath) else Font.Builder(it)
+                        if (path.contains("/pyoncord/")) {
+                            // We do a little hack :P
+                            val actualPath = path.substringAfter("/pyoncord/")
+                            args[0] = File(pyoncord, actualPath).absolutePath
+                        }
                     }
                 }
-            }
+            )
+
+            XposedBridge.hookMethod(
+                fileManagerModule.declaredMethods.find { it.name == "writeFile" },
+                object: XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
+                        val dir = args[0] as? String ?: return
+                        val path = args[1] as? String ?: return
+                        
+                        val storageDirs = storageDirsField.get(thisObject) as HashMap<String, String>
+                        if (dir == "documents" && path.contains("pyoncord/")) {
+                            val docsDir = File(storageDirs["documents"] as String).toPath()
+                            args[1] = docsDir.relativize(File(pyoncord.parentFile, path).toPath()).toString()
+                        }
+                    }
+                }
+            )
 
             // Fight package renaming side effects
             if (packageName != "com.discord") {
@@ -154,6 +164,15 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
             }
 
             // Custom fonts
+            val fontHook = object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
+                    File(pyoncord, args[1] as String).takeIf { it.exists() }?.let {
+                        Log.d(LOG_TAG, "Overriding font from ${args[1]} to $it")
+                        result = if (method.name == "createFromAsset") Typeface.createFromFile(it.absolutePath) else Font.Builder(it)
+                    }
+                }
+            }
+
             XposedBridge.hookMethod(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     Font.Builder::class.java.getDeclaredConstructor(AssetManager::class.java, String::class.java)
