@@ -40,15 +40,17 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         const val LOG_TAG = "Pyoncord"
         const val DEFAULT_BUNDLE_ENDPOINT = "https://raw.githubusercontent.com/pyoncord/pyoncord/builds/pyoncord.js"
 
-        val pyoncord = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "pyoncord").apply { mkdirs() }
+        val PYONCORD_DIR = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "pyoncord").apply { mkdirs() }
 
-        val cache = File(pyoncord, "cache").apply { mkdirs() }
+        val CACHE_DIR = File(PYONCORD_DIR, "cache").apply { mkdir() }
+        val DRAWABLES_DIR = File(PYONCORD_DIR, "drawables").apply { mkdir() }
+        
+        val bundle = File(PYONCORD_DIR, "pyoncord.js")
+        val etag = File(PYONCORD_DIR, "etag")
 
-        val bundle = File(cache, "pyoncord.js")
-        val etag = File(cache, "etag")
-
-        // val fontsDir = File(pyoncord, "fonts")
-        val drawablesDir = File(pyoncord, "drawables")
+        val loaderPayloadJson = buildJsonObject {
+            put("loader", "PyoncordXposed")
+        }
     }
 
     private lateinit var resources: XModuleResources
@@ -72,6 +74,8 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
             }
         })
     }
+
+    fun createEvalFile(code: String, identifier: String) = File(CACHE_DIR, "$identifier.js").apply { writeText(code) }
 
     fun restartApp() = with(appActivity.applicationContext) {
         val intent = packageManager.getLaunchIntentForPackage(packageName)!!
@@ -130,7 +134,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                         if (path.contains("/pyoncord/")) {
                             // We do a little hack :P
                             val actualPath = path.substringAfter("/pyoncord/")
-                            args[0] = File(pyoncord, actualPath).absolutePath
+                            args[0] = File(PYONCORD_DIR, actualPath).absolutePath
                         }
                     }
                 }
@@ -147,7 +151,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                         val storageDirs = storageDirsField.get(thisObject) as HashMap<String, String>
                         if (dir == "documents" && path.startsWith("pyoncord/")) {
                             val docsDir = File(storageDirs["documents"] as String).toPath()
-                            args[1] = docsDir.relativize(File(pyoncord.parentFile, path).toPath()).toString()
+                            args[1] = docsDir.relativize(File(PYONCORD_DIR.parentFile, path).toPath()).toString()
                         }
                     }
                 }
@@ -167,7 +171,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
             // Custom fonts
             val fontHook = object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
-                    File(pyoncord, args[1] as String).takeIf { it.exists() }?.let {
+                    File(PYONCORD_DIR, args[1] as String).takeIf { it.exists() }?.let {
                         Log.d(LOG_TAG, "Overriding font from ${args[1]} to $it")
                         result = if (method.name == "createFromAsset") Typeface.createFromFile(it.absolutePath) else Font.Builder(it)
                     }
@@ -193,7 +197,7 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                     val name = param.args[1] as? String ?: return
 
                     val uri = uriCache.getOrPut(name) {
-                        File(drawablesDir, "$name.png").takeIf { it.exists() }?.let { 
+                        File(DRAWABLES_DIR, "$name.png").takeIf { it.exists() }?.let { 
                             Uri.fromFile(it) 
                         } ?: Uri.EMPTY
                     }
@@ -209,9 +213,15 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         // TODO: Loader config
         val hook = object: XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) = with(param) {
-                // Load pre-patches and identity
-                XposedBridge.invokeOriginalMethod(loadScriptFromAssets, thisObject, arrayOf(resources.assets, "assets://js/modules.js", true))
-                XposedBridge.invokeOriginalMethod(loadScriptFromAssets, thisObject, arrayOf(resources.assets, "assets://js/identity.js", true))
+                val payloadFile = createEvalFile("PYONCORD_LOADER_PAYLOAD=${Json.encodeToString(loaderPayloadJson)}", "payload")
+                
+                // Load pre-patches and payload
+                XposedBridge.invokeOriginalMethod(loadScriptFromAssets, thisObject, arrayOf(resources.assets, "assets://js/preinit.js", true))
+                XposedBridge.invokeOriginalMethod(
+                    loadScriptFromFile,
+                    thisObject,
+                    arrayOf(payloadFile.absolutePath, "pyoncord-payload", true)
+                )
                 
                 // Invoke the original method
                 XposedBridge.invokeOriginalMethod(method, thisObject, args)
