@@ -122,41 +122,6 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
         }
 
         runCatching {
-            val fileManagerModule = classLoader.loadClass("com.discord.file_manager.FileManagerModule")
-            val storageDirsField = fileManagerModule.getDeclaredField("storageDirs").apply { isAccessible = true }
-
-            XposedBridge.hookMethod(
-                fileManagerModule.declaredMethods.find { it.name == "readFile" },
-                object: XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
-                        val path = args[0] as? String ?: return
-
-                        if (path.contains("/pyoncord/")) {
-                            // We do a little hack :P
-                            val actualPath = path.substringAfter("/pyoncord/")
-                            args[0] = File(PYONCORD_DIR, actualPath).absolutePath
-                        }
-                    }
-                }
-            )
-
-            XposedBridge.hookMethod(
-                fileManagerModule.declaredMethods.find { it.name == "writeFile" },
-                object: XC_MethodHook() {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
-                        val dir = args[0] as? String ?: return
-                        val path = args[1] as? String ?: return
-                        
-                        val storageDirs = storageDirsField.get(thisObject) as HashMap<String, String>
-                        if (dir == "documents" && path.startsWith("pyoncord/")) {
-                            val docsDir = File(storageDirs["documents"] as String).toPath()
-                            args[1] = docsDir.relativize(File(PYONCORD_DIR.parentFile, path).toPath()).toString()
-                        }
-                    }
-                }
-            )
-
             // Fight package renaming side effects
             if (packageName != "com.discord") {
                 val getIdentifier = Resources::class.java.getDeclaredMethod("getIdentifier", String::class.java, String::class.java, String::class.java)
@@ -167,26 +132,6 @@ class Main : IXposedHookZygoteInit, IXposedHookLoadPackage {
                     }
                 })
             }
-
-            // Custom fonts
-            val fontHook = object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam): Unit = with(param) {
-                    File(PYONCORD_DIR, args[1] as String).takeIf { it.exists() }?.let {
-                        Log.d(LOG_TAG, "Overriding font from ${args[1]} to $it")
-                        result = if (method.name == "createFromAsset") Typeface.createFromFile(it.absolutePath) else Font.Builder(it)
-                    }
-                }
-            }
-
-            XposedBridge.hookMethod(
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    Font.Builder::class.java.getDeclaredConstructor(AssetManager::class.java, String::class.java)
-                } else {
-                    // I don't have any older device to test, so let's just wish this works and doesn't break anything :P
-                    Typeface::class.java.getDeclaredMethod("createFromAsset", AssetManager::class.java, String::class.java)
-                },
-                fontHook
-            )
 
             // Custom drawables
             val uriCache = mutableMapOf<String, Uri>()
