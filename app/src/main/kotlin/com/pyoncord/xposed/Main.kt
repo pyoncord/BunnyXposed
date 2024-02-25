@@ -34,7 +34,8 @@ data class LoaderConfig(
 class Main : IXposedHookLoadPackage {
     private val pyonModules: Array<PyonModule> = arrayOf(
         ThemeModule(),
-        SysColorsModule()
+        SysColorsModule(),
+        FontsModule()
     )
 
     fun buildLoaderJsonString(): String {
@@ -152,7 +153,7 @@ class Main : IXposedHookLoadPackage {
                         )
                     }
 
-                XposedBridge.invokeOriginalMethod(
+                if (bundle.exists()) XposedBridge.invokeOriginalMethod(
                     loadScriptFromFile, 
                     param.thisObject, 
                     arrayOf(bundle.absolutePath, bundle.absolutePath, param.args[2])
