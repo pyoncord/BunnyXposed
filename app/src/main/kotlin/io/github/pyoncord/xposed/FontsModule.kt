@@ -1,7 +1,7 @@
 // credits to janisslsm from his PR: https://github.com/vendetta-mod/VendettaXposed/pull/17
 // the functions hooked are based on the RN codebase, just modified to add fonts
 
-package com.pyoncord.xposed
+package io.github.pyoncord.xposed
 
 import android.content.res.AssetManager
 import android.os.Build

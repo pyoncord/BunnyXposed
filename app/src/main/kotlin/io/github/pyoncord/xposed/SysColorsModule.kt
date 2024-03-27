@@ -1,4 +1,4 @@
-package com.pyoncord.xposed
+package io.github.pyoncord.xposed
 
 import android.app.AndroidAppHelper
 import android.content.Context

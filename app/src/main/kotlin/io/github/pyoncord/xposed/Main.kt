@@ -1,4 +1,4 @@
-package com.pyoncord.xposed
+package io.github.pyoncord.xposed
 
 import android.content.res.AssetManager
 import android.content.res.Resources
@@ -26,9 +26,7 @@ data class CustomLoadUrl(
 )
 @Serializable
 data class LoaderConfig(
-    val customLoadUrl: CustomLoadUrl,
-    val loadReactDevTools: Boolean? = null,
-    val loadPyoncord: Boolean? = null
+    val customLoadUrl: CustomLoadUrl
 )
 
 class Main : IXposedHookLoadPackage {
@@ -93,10 +91,8 @@ class Main : IXposedHookLoadPackage {
             LoaderConfig(
                 customLoadUrl = CustomLoadUrl(
                     enabled = false,
-                    url = "http://localhost:4040/bunny.js"
-                ),
-                loadReactDevTools = false,
-                loadPyoncord = false
+                    url = "http://localhost:4040/pyoncord.js"
+                )
             )
         }
 
@@ -105,13 +101,12 @@ class Main : IXposedHookLoadPackage {
             try {
                 val client = HttpClient(CIO) {
                     install(HttpTimeout) { requestTimeoutMillis = 3000 }
-                    install(UserAgent) { agent = "PyonXposed" }
+                    install(UserAgent) { agent = "PyoncordXposed" }
                 }
 
                 val url = 
                     if (config.customLoadUrl.enabled) config.customLoadUrl.url 
-                    else if (config.loadPyoncord == true) "https://raw.githubusercontent.com/pyoncord/pyoncord/builds/pyoncord.js"
-                    else "https://raw.githubusercontent.com/pyoncord/detta-builds/main/bunny.js"
+                    else "https://raw.githubusercontent.com/pyoncord/builds/main/pyoncord.js"
                 
                 val response: HttpResponse = client.get(url) {
                     headers { 

@@ -1,4 +1,4 @@
-package com.pyoncord.xposed
+package io.github.pyoncord.xposed
 
 import android.content.Context
 import android.graphics.Color

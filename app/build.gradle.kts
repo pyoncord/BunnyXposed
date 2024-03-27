@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.pyoncord.xposed"
+    namespace = "io.github.pyoncord.xposed"
     compileSdk = 33
 
     defaultConfig {
-        applicationId = "com.pyoncord.xposed"
+        applicationId = "io.github.pyoncord.xposed"
         minSdk = 24
         targetSdk = 33
         versionCode = 1
