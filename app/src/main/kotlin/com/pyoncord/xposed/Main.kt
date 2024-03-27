@@ -104,7 +104,7 @@ class Main : IXposedHookLoadPackage {
         val httpJob = scope.async(Dispatchers.IO) {
             try {
                 val client = HttpClient(CIO) {
-                    install(HttpTimeout) { requestTimeoutMillis = 1000 }
+                    install(HttpTimeout) { requestTimeoutMillis = 3000 }
                     install(UserAgent) { agent = "PyonXposed" }
                 }
 
