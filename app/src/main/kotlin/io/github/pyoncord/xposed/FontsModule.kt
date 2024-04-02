@@ -142,7 +142,6 @@ class FontsModule: PyonModule() {
                         Typeface.createFromAsset(assetManager, fileName)
                 } catch (e: java.lang.RuntimeException) {
                     // If the typeface asset does not exist, try another extension.
-                    XposedBridge.log("(under) acquiring $fileName font failed ${e.cause}")
                     continue
                 }
             }

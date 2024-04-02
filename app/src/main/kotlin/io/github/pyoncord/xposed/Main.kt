@@ -33,7 +33,8 @@ class Main : IXposedHookLoadPackage {
     private val pyonModules: Array<PyonModule> = arrayOf(
         ThemeModule(),
         SysColorsModule(),
-        FontsModule()
+        FontsModule(),
+        // BubbleModule()
     )
 
     fun buildLoaderJsonString(): String {
@@ -100,13 +101,15 @@ class Main : IXposedHookLoadPackage {
         val httpJob = scope.async(Dispatchers.IO) {
             try {
                 val client = HttpClient(CIO) {
-                    install(HttpTimeout) { requestTimeoutMillis = 3000 }
+                    if (bundle.exists()) install(HttpTimeout) {
+                        requestTimeoutMillis = 3000
+                    }
                     install(UserAgent) { agent = "PyoncordXposed" }
                 }
 
                 val url = 
                     if (config.customLoadUrl.enabled) config.customLoadUrl.url 
-                    else "https://raw.githubusercontent.com/pyoncord/builds/main/pyoncord.js"
+                    else "https://cdn.jsdelivr.net/gh/pyoncord/detta-builds@main/bunny.js"
                 
                 val response: HttpResponse = client.get(url) {
                     headers { 
@@ -118,7 +121,8 @@ class Main : IXposedHookLoadPackage {
 
                 if (response.status == HttpStatusCode.OK) {
                     bundle.writeBytes(response.body())
-                    response.headers["Etag"]?.let { etag.writeText(it) }
+                    if (response.headers["Etag"] != null) etag.writeText(response.headers["Etag"]!!)
+                    else if (etag.exists()) etag.delete()
                 }
 
                 return@async
@@ -148,7 +152,7 @@ class Main : IXposedHookLoadPackage {
                         )
                     }
 
-                if (bundle.exists()) XposedBridge.invokeOriginalMethod(
+                XposedBridge.invokeOriginalMethod(
                     loadScriptFromFile, 
                     param.thisObject, 
                     arrayOf(bundle.absolutePath, bundle.absolutePath, param.args[2])
