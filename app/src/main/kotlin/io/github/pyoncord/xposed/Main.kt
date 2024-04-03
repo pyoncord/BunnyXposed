@@ -101,16 +101,16 @@ class Main : IXposedHookLoadPackage {
         val httpJob = scope.async(Dispatchers.IO) {
             try {
                 val client = HttpClient(CIO) {
-                    if (bundle.exists()) install(HttpTimeout) {
-                        requestTimeoutMillis = 3000
+                    install(HttpTimeout) {
+                        requestTimeoutMillis = if (bundle.exists()) 3000 else HttpTimeout.INFINITE_TIMEOUT_MS
                     }
                     install(UserAgent) { agent = "PyoncordXposed" }
                 }
 
                 val url = 
                     if (config.customLoadUrl.enabled) config.customLoadUrl.url 
-                    else "https://cdn.jsdelivr.net/gh/pyoncord/detta-builds@main/bunny.js"
-                
+                    else "https://raw.githubusercontent.com/pyoncord/detta-builds/main/bunny.js"
+
                 val response: HttpResponse = client.get(url) {
                     headers { 
                         if (etag.exists() && bundle.exists()) {
