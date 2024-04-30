@@ -7,6 +7,7 @@ import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import io.github.pyoncord.xposed.BuildConfig
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -34,12 +35,12 @@ class Main : IXposedHookLoadPackage {
         ThemeModule(),
         SysColorsModule(),
         FontsModule(),
-        // BubbleModule()
     )
 
     fun buildLoaderJsonString(): String {
         val obj = buildJsonObject {
-            put("loaderName", "PyoncordXposed")
+            put("loaderName", "BunnyXposed")
+            put("loaderVersion", BuildConfig.VERSION_NAME)
 
             for (module in pyonModules) {
                 module.buildJson(this)
@@ -104,7 +105,7 @@ class Main : IXposedHookLoadPackage {
                     install(HttpTimeout) {
                         requestTimeoutMillis = if (bundle.exists()) 3000 else HttpTimeout.INFINITE_TIMEOUT_MS
                     }
-                    install(UserAgent) { agent = "PyoncordXposed" }
+                    install(UserAgent) { agent = "BunnyXposed" }
                 }
 
                 val url = 
@@ -127,7 +128,7 @@ class Main : IXposedHookLoadPackage {
 
                 return@async
             } catch (e: Exception) {
-                Log.e("Pyoncord", "Failed to download Pyoncord")
+                Log.e("Bunny", "Failed to download bundle")
             }
         }
 

@@ -77,9 +77,8 @@ class ThemeModule : PyonModule() {
 
         if (!themeFile.isValidish()) return null
         
-        val themeText = themeFile.readText()
-
         return try {
+            val themeText = themeFile.readText()
             Json { ignoreUnknownKeys = true }.decodeFromString<Theme>(themeText)
         } catch (e: Exception) { null }
     }

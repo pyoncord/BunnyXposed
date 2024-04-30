@@ -1,5 +1,5 @@
 // credits to janisslsm from his PR: https://github.com/vendetta-mod/VendettaXposed/pull/17
-// the functions hooked are based on the RN codebase, just modified to add fonts
+// hooks are modified function from RN codebase
 
 package io.github.pyoncord.xposed
 
@@ -10,31 +10,96 @@ import android.graphics.Typeface
 import android.graphics.Typeface.CustomFallbackBuilder
 import android.graphics.fonts.Font
 import android.graphics.fonts.FontFamily
+import android.util.Log
 import android.webkit.URLUtil
 import de.robv.android.xposed.XC_MethodReplacement
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.*
 import java.io.IOException
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.*
+
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.request.*
+import io.ktor.client.engine.cio.*
+import io.ktor.client.statement.*
+import io.ktor.client.plugins.*
+import io.ktor.http.*
+
+@Serializable
+data class FontDefinition(
+    val name: String,
+    val description: String,
+    val spec: Int,
+    val hash: String,
+    val main: Map<String, String>,
+)
 
 class FontsModule: PyonModule() {
     private val EXTENSIONS = arrayOf("", "_bold", "_italic", "_bold_italic")
     private val FILE_EXTENSIONS = arrayOf(".ttf", ".otf")
     private val FONTS_ASSET_PATH = "fonts/"
+
     private lateinit var fontsDir: File
     private lateinit var fontsAbsPath: String
 
     override fun buildJson(builder: JsonObjectBuilder) {
         builder.apply {
-            put("supportFonts", true)
+            put("fontPatch", 1)
         }
     }
 
     override fun onInit(packageParam: XC_LoadPackage.LoadPackageParam) = with (packageParam) {
-        fontsDir = File(appInfo.dataDir, "files/pyoncord/fonts").also { it.mkdirs() }
+        val fontDefFile = File(appInfo.dataDir, "files/pyoncord/fonts.json")
+        if (!fontDefFile.exists()) return@with
+
+        val fontDef = try {
+            Json { ignoreUnknownKeys = true }.decodeFromString<FontDefinition>(fontDefFile.readText())
+        } catch (_: Throwable) { return@with }
+
+        fontsDir = File(appInfo.dataDir, "files/pyoncord/downloads/fonts").apply { mkdirs() }
         fontsAbsPath = fontsDir.absolutePath + "/"
+
+        fontsDir.listFiles()?.forEach { file ->
+            val fileName = file.name
+            if (!fileName.startsWith(".")) {
+                val fontName = fileName.split('.')[0]
+                if (fontDef.main.keys.none { it == fontName }) {
+                    Log.i("Bunny", "Deleting font file: $fileName")
+                    file.delete()
+                }
+            }
+        }
+
+        val scope = MainScope()
+        val downloadJob = scope.async(Dispatchers.IO) {
+            fontDef.main.forEach { (name, url) ->
+                try {
+                    Log.i("Bunny", "Downloading $name from $url")
+                    val file = File(fontsDir, "$name${FILE_EXTENSIONS.first { url.endsWith(it) }}")
+                    val client = HttpClient(CIO) {
+                        install(UserAgent) { agent = "BunnyXposed" }
+                    }
+
+                    val response: HttpResponse = client.get(url)
+
+                    if (response.status == HttpStatusCode.OK) {
+                        file.writeBytes(response.body())
+                    }
+
+                    return@async
+                } catch (e: Throwable) {
+                    Log.e("Bunny", "Failed to download fonts ($name from $url)")
+                }
+            }
+        }
 
         XposedHelpers.findAndHookMethod("com.facebook.react.views.text.ReactFontManager", classLoader, "createAssetTypeface",
             String::class.java,
@@ -44,6 +109,7 @@ class FontsModule: PyonModule() {
                     val fontFamilyName: String = param.args[0].toString();
                     val style: Int = param.args[1] as Int;
                     val assetManager: AssetManager = param.args[2] as AssetManager;
+                    runBlocking { downloadJob.join() }
                     return createAssetTypeface(fontFamilyName, style, assetManager)
                 }
             });
