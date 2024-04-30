@@ -53,6 +53,6 @@ jobs:
                 gh release create "$tag" \
                     --title "${{ github.event.inputs.versionName }}" \
                     --generate-notes \
-                    ./Manager.apk
+                    ./*.apk
             env:
                 GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
