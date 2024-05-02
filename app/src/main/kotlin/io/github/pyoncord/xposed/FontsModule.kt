@@ -35,10 +35,9 @@ import io.ktor.http.*
 
 @Serializable
 data class FontDefinition(
-    val name: String,
-    val description: String,
-    val spec: Int,
-    val hash: String,
+    val name: String? = null,
+    val description: String? = null,
+    val spec: Int? = null,
     val main: Map<String, String>,
 )
 
@@ -52,7 +51,7 @@ class FontsModule: PyonModule() {
 
     override fun buildJson(builder: JsonObjectBuilder) {
         builder.apply {
-            put("fontPatch", 1)
+            put("fontPatch", 2)
         }
     }
 
@@ -64,7 +63,7 @@ class FontsModule: PyonModule() {
             Json { ignoreUnknownKeys = true }.decodeFromString<FontDefinition>(fontDefFile.readText())
         } catch (_: Throwable) { return@with }
 
-        fontsDir = File(appInfo.dataDir, "files/pyoncord/downloads/fonts").apply { mkdirs() }
+        fontsDir = File(appInfo.dataDir, "files/pyoncord/downloads/fonts/${fontDef.name}").apply { mkdirs() }
         fontsAbsPath = fontsDir.absolutePath + "/"
 
         fontsDir.listFiles()?.forEach { file ->
@@ -78,27 +77,29 @@ class FontsModule: PyonModule() {
             }
         }
 
-        val scope = MainScope()
-        val downloadJob = scope.async(Dispatchers.IO) {
-            fontDef.main.forEach { (name, url) ->
-                try {
-                    Log.i("Bunny", "Downloading $name from $url")
-                    val file = File(fontsDir, "$name${FILE_EXTENSIONS.first { url.endsWith(it) }}")
-                    val client = HttpClient(CIO) {
-                        install(UserAgent) { agent = "BunnyXposed" }
+        val downloadJob = CoroutineScope(Dispatchers.IO).launch {
+            fontDef.main.keys.map { name ->
+                async {
+                    val url = fontDef.main.getValue(name)
+                    try {
+                        Log.i("Bunny", "Downloading $name from $url")
+                        val file = File(fontsDir, "$name${FILE_EXTENSIONS.first { url.endsWith(it) }}")
+                        val client = HttpClient(CIO) {
+                            install(UserAgent) { agent = "BunnyXposed" }
+                        }
+
+                        val response: HttpResponse = client.get(url)
+
+                        if (response.status == HttpStatusCode.OK) {
+                            file.writeBytes(response.body())
+                        }
+
+                        return@async
+                    } catch (e: Throwable) {
+                        Log.e("Bunny", "Failed to download fonts ($name from $url)")
                     }
-
-                    val response: HttpResponse = client.get(url)
-
-                    if (response.status == HttpStatusCode.OK) {
-                        file.writeBytes(response.body())
-                    }
-
-                    return@async
-                } catch (e: Throwable) {
-                    Log.e("Bunny", "Failed to download fonts ($name from $url)")
                 }
-            }
+            }.awaitAll()
         }
 
         XposedHelpers.findAndHookMethod("com.facebook.react.views.text.ReactFontManager", classLoader, "createAssetTypeface",
