@@ -127,8 +127,8 @@ class Main : IXposedHookLoadPackage {
                 }
 
                 return@async
-            } catch (e: Exception) {
-                Log.e("Bunny", "Failed to download bundle")
+            } catch (e: Throwable) {
+                Log.e("Bunny", "Failed to download bundle", e)
             }
         }
 

@@ -47,7 +47,8 @@ class FontsModule: PyonModule() {
     private val FONTS_ASSET_PATH = "fonts/"
 
     private lateinit var fontsDir: File
-    private lateinit var fontsAbsPath: String
+    private lateinit var fontsDownloadsDir: File
+    private var fontsAbsPath: String? = null
 
     override fun buildJson(builder: JsonObjectBuilder) {
         builder.apply {
@@ -56,6 +57,18 @@ class FontsModule: PyonModule() {
     }
 
     override fun onInit(packageParam: XC_LoadPackage.LoadPackageParam) = with (packageParam) {
+        XposedHelpers.findAndHookMethod("com.facebook.react.views.text.ReactFontManager", classLoader, "createAssetTypeface",
+            String::class.java,
+            Int::class.java,
+            "android.content.res.AssetManager", object : XC_MethodReplacement() {
+                override fun replaceHookedMethod(param: MethodHookParam): Typeface? {
+                    val fontFamilyName: String = param.args[0].toString()
+                    val style: Int = param.args[1] as Int
+                    val assetManager: AssetManager = param.args[2] as AssetManager
+                    return createAssetTypeface(fontFamilyName, style, assetManager)
+                }
+            });
+
         val fontDefFile = File(appInfo.dataDir, "files/pyoncord/fonts.json")
         if (!fontDefFile.exists()) return@with
 
@@ -63,7 +76,8 @@ class FontsModule: PyonModule() {
             Json { ignoreUnknownKeys = true }.decodeFromString<FontDefinition>(fontDefFile.readText())
         } catch (_: Throwable) { return@with }
 
-        fontsDir = File(appInfo.dataDir, "files/pyoncord/downloads/fonts/${fontDef.name}").apply { mkdirs() }
+        fontsDownloadsDir = File(appInfo.dataDir, "files/pyoncord/downloads/fonts").apply { mkdirs() }
+        fontsDir = File(fontsDownloadsDir, fontDef.name).apply { mkdirs() }
         fontsAbsPath = fontsDir.absolutePath + "/"
 
         fontsDir.listFiles()?.forEach { file ->
@@ -77,13 +91,16 @@ class FontsModule: PyonModule() {
             }
         }
 
-        val downloadJob = CoroutineScope(Dispatchers.IO).launch {
+        // These files should be downloaded by the JS side, but oh well
+        CoroutineScope(Dispatchers.IO).launch {
             fontDef.main.keys.map { name ->
                 async {
                     val url = fontDef.main.getValue(name)
                     try {
                         Log.i("Bunny", "Downloading $name from $url")
                         val file = File(fontsDir, "$name${FILE_EXTENSIONS.first { url.endsWith(it) }}")
+                        if (file.exists()) return@async
+
                         val client = HttpClient(CIO) {
                             install(UserAgent) { agent = "BunnyXposed" }
                         }
@@ -96,24 +113,11 @@ class FontsModule: PyonModule() {
 
                         return@async
                     } catch (e: Throwable) {
-                        Log.e("Bunny", "Failed to download fonts ($name from $url)")
+                        Log.e("Bunny", "Failed to download fonts ($name from $url)", e)
                     }
                 }
             }.awaitAll()
-        }
-
-        XposedHelpers.findAndHookMethod("com.facebook.react.views.text.ReactFontManager", classLoader, "createAssetTypeface",
-            String::class.java,
-            Int::class.java,
-            "android.content.res.AssetManager", object : XC_MethodReplacement() {
-                override fun replaceHookedMethod(param: MethodHookParam): Typeface? {
-                    val fontFamilyName: String = param.args[0].toString();
-                    val style: Int = param.args[1] as Int;
-                    val assetManager: AssetManager = param.args[2] as AssetManager;
-                    runBlocking { downloadJob.join() }
-                    return createAssetTypeface(fontFamilyName, style, assetManager)
-                }
-            });
+        } 
 
         return@with
     }
@@ -128,7 +132,19 @@ class FontsModule: PyonModule() {
             // Iterate over the list of fontFamilyNames, constructing new FontFamily objects
             // for use in the CustomFallbackBuilder below.
             for (fontFamilyName in fontFamilyNames) {
-                for (fontRootPath in arrayOf(fontsAbsPath, FONTS_ASSET_PATH)) {
+                try {
+                    for (fileExtension in FILE_EXTENSIONS) {
+                        val (customName, refName) = fontFamilyName.split(":")
+                        val file = File(fontsDownloadsDir, "$customName/$refName.$fileExtension")
+                        val font = Font.Builder(file).build()
+                        val family = FontFamily.Builder(font).build()
+                        fontFamilies.add(family)
+                    }
+                } catch (e: Throwable) {
+                    // ignore
+                }
+
+                for (fontRootPath in arrayOf(fontsAbsPath, FONTS_ASSET_PATH).filter { it != null }) {
                     for (fileExtension in FILE_EXTENSIONS) {
                         val fileName = java.lang.StringBuilder()
                             .append(fontRootPath)
@@ -191,9 +207,20 @@ class FontsModule: PyonModule() {
 
         val extension = EXTENSIONS[style]
 
+        try {
+            for (fileExtension in FILE_EXTENSIONS) {
+                val (customName, refName) = fontFamilyName.split(":")
+                val file = File(fontsDownloadsDir, "$customName/$refName.$fileExtension")
+                if (!file.exists()) throw Exception()
+                return Typeface.createFromFile(file.absolutePath)
+            }
+        } catch (e: Throwable) {
+            // ignore
+        }
+
         // Lastly, after all those checks above, this is the original RN logic for
         // getting the typeface.
-        for (fontRootPath in arrayOf(fontsAbsPath, FONTS_ASSET_PATH)) {
+        for (fontRootPath in arrayOf(fontsAbsPath, FONTS_ASSET_PATH).filter { it != null }) {
             for (fileExtension in FILE_EXTENSIONS) {
                 val fileName = java.lang.StringBuilder()
                     .append(fontRootPath)
