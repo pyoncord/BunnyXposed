@@ -12,7 +12,7 @@
 
   <br>
 
-  [![Stars](https://img.shields.io/github/stars/pyoncord/BunnyXposed?logo=github&style=for-the-badge)](https://github.com/pyoncord/BunnyManager/stargazers)
+  [![Stars](https://img.shields.io/github/stars/pyoncord/BunnyXposed?logo=github&style=for-the-badge)](https://github.com/pyoncord/BunnyXposed/stargazers)
   [![Discord](https://img.shields.io/discord/1196075698301968455?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/XjYgWXHb9Q)
   
   <br>
