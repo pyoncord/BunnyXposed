@@ -58,14 +58,14 @@ class Main : IXposedHookLoadPackage {
         for (module in pyonModules) module.onInit(param)
 
         val loadScriptFromAssets = catalystInstanceImpl.getDeclaredMethod(
-            "jniLoadScriptFromAssets",
+            "loadScriptFromAssets",
             AssetManager::class.java,
             String::class.java,
             Boolean::class.javaPrimitiveType
         ).apply { isAccessible = true }
 
         val loadScriptFromFile = catalystInstanceImpl.getDeclaredMethod(
-            "jniLoadScriptFromFile",
+            "loadScriptFromFile",
             String::class.java,
             String::class.java,
             Boolean::class.javaPrimitiveType
