@@ -19,6 +19,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven(url = "https://api.xposed.info/")
         // See comment in buildscript repos
         jcenter()
     }

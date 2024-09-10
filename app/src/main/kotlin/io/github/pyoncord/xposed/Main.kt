@@ -1,8 +1,13 @@
 package io.github.pyoncord.xposed
 
+import android.app.Activity 
+import android.app.AndroidAppHelper
+import android.content.Context
 import android.content.res.AssetManager
 import android.content.res.Resources
 import android.util.Log
+import android.os.Bundle
+import android.widget.Toast
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -50,10 +55,20 @@ class Main : IXposedHookLoadPackage {
         return Json.encodeToString(obj)
     }
 
-    override fun handleLoadPackage(param: XC_LoadPackage.LoadPackageParam) = with (param) {
-        val catalystInstanceImpl = runCatching {
-            classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl")
-        }.getOrElse { return@with }
+    override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
+        val reactActivity = runCatching {
+            lpparam.classLoader.loadClass("com.discord.react_activities.ReactActivity")
+        }.getOrElse { return } // Package is not our the target app, return
+
+        XposedBridge.hookMethod(reactActivity.getDeclaredMethod("onCreate", Bundle::class.java), object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                init(lpparam, param.thisObject as Activity)
+            }
+        })
+    }
+
+    fun init(param: XC_LoadPackage.LoadPackageParam, activity: Activity) = with (param) {
+        val catalystInstanceImpl = classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl")
 
         for (module in pyonModules) module.onInit(param)
 
@@ -93,7 +108,7 @@ class Main : IXposedHookLoadPackage {
             LoaderConfig(
                 customLoadUrl = CustomLoadUrl(
                     enabled = false,
-                    url = "http://localhost:4040/pyoncord.js"
+                    url = "" // Not used
                 )
             )
         }
@@ -102,16 +117,19 @@ class Main : IXposedHookLoadPackage {
         val httpJob = scope.async(Dispatchers.IO) {
             try {
                 val client = HttpClient(CIO) {
+                    expectSuccess = true
                     install(HttpTimeout) {
-                        requestTimeoutMillis = if (bundle.exists()) 3000 else HttpTimeout.INFINITE_TIMEOUT_MS
+                        requestTimeoutMillis = if (bundle.exists()) 3000 else 10000
                     }
                     install(UserAgent) { agent = "BunnyXposed" }
                 }
 
                 val url = 
                     if (config.customLoadUrl.enabled) config.customLoadUrl.url 
-                    else "https://raw.githubusercontent.com/pyoncord/detta-builds/main/bunny.js"
+                    else "https://raw.githubusercontent.com/pyoncord/detta-builds/main/bunny.min.js"
 
+                Log.e("Bunny", "Fetching JS bundle from $url")
+                
                 val response: HttpResponse = client.get(url) {
                     headers { 
                         if (etag.exists() && bundle.exists()) {
@@ -120,14 +138,24 @@ class Main : IXposedHookLoadPackage {
                     }
                 }
 
-                if (response.status == HttpStatusCode.OK) {
-                    bundle.writeBytes(response.body())
-                    if (response.headers["Etag"] != null) etag.writeText(response.headers["Etag"]!!)
-                    else if (etag.exists()) etag.delete()
+                bundle.writeBytes(response.body())
+                if (response.headers["Etag"] != null) {
+                    etag.writeText(response.headers["Etag"]!!)
+                }
+                else if (etag.exists()) {
+                    // This is called when server does not return an E-tag, so clear em
+                    etag.delete()
                 }
 
                 return@async
+            } catch (e: RedirectResponseException) {
+                if (e.response.status != HttpStatusCode.NotModified) throw e;
+                Log.e("Bunny", "Server reponded with status code 304 - no changes to file")
             } catch (e: Throwable) {
+                activity.runOnUiThread {
+                    Toast.makeText(activity.applicationContext, "Failed to fetch JS bundle, Bunny may not load!", Toast.LENGTH_SHORT).show()
+                }
+
                 Log.e("Bunny", "Failed to download bundle", e)
             }
         }
