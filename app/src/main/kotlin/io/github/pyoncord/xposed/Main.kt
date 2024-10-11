@@ -1,8 +1,6 @@
 package io.github.pyoncord.xposed
 
-import android.app.Activity 
-import android.app.AndroidAppHelper
-import android.content.Context
+import android.app.Activity
 import android.content.res.AssetManager
 import android.content.res.Resources
 import android.util.Log
@@ -12,7 +10,6 @@ import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage
-import io.github.pyoncord.xposed.BuildConfig
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -60,14 +57,27 @@ class Main : IXposedHookLoadPackage {
             lpparam.classLoader.loadClass("com.discord.react_activities.ReactActivity")
         }.getOrElse { return } // Package is not our the target app, return
 
+        var activity: Activity? = null;
+        val onActivityCreateCallback = mutableSetOf<(activity: Activity) -> Unit>()
+
         XposedBridge.hookMethod(reactActivity.getDeclaredMethod("onCreate", Bundle::class.java), object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                init(lpparam, param.thisObject as Activity)
+                activity = param.thisObject as Activity;
+                onActivityCreateCallback.forEach { cb -> cb(activity!!) }
+                onActivityCreateCallback.clear()
             }
         })
+
+        init(lpparam) { cb ->
+            if (activity != null) cb(activity!!)
+            else onActivityCreateCallback.add(cb)
+        }
     }
 
-    fun init(param: XC_LoadPackage.LoadPackageParam, activity: Activity) = with (param) {
+    private fun init(
+        param: XC_LoadPackage.LoadPackageParam,
+        onActivityCreate: ((activity: Activity) -> Unit) -> Unit
+    ) = with (param) {
         val catalystInstanceImpl = classLoader.loadClass("com.facebook.react.bridge.CatalystInstanceImpl")
 
         for (module in pyonModules) module.onInit(param)
@@ -150,10 +160,16 @@ class Main : IXposedHookLoadPackage {
                 return@async
             } catch (e: RedirectResponseException) {
                 if (e.response.status != HttpStatusCode.NotModified) throw e;
-                Log.e("Bunny", "Server reponded with status code 304 - no changes to file")
+                Log.e("Bunny", "Server responded with status code 304 - no changes to file")
             } catch (e: Throwable) {
-                activity.runOnUiThread {
-                    Toast.makeText(activity.applicationContext, "Failed to fetch JS bundle, Bunny may not load!", Toast.LENGTH_SHORT).show()
+                onActivityCreate { activity ->
+                    activity.runOnUiThread {
+                        Toast.makeText(
+                            activity.applicationContext,
+                            "Failed to fetch JS bundle, Bunny may not load!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
 
                 Log.e("Bunny", "Failed to download bundle", e)
